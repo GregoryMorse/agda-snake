@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>Snake Game</title>
+		<!-- <script src=""></script> -->
+		<script>
+			var clrs = ["#000000", "#ff0000", "#00ff00", "#ffff00", "#0000ff", "#ff00ff", "00ffff", "#ffffff"];
+			//width, height and charHeight could be user exposed customizable parameters
+			var width = 80; //9*80=720
+			var height = 25; //16*25=625
+			var charHeight = 16;
+			var charWidth = 0;
+			var state;
+			var stdin = "";
+			var LEFTARROW = '\x25';
+			var UPARROW = '\x26';
+			var RIGHTARROW = '\x27';
+			var DOWNARROW = '\x28';
+			document.onkeydown = function (evt) {
+				evt = evt || window.event;
+				stdin += String.fromCharCode(evt.keyCode);
+			}
+			function initTerm() {
+				var canvas  = document.getElementById("cvs");
+				var context = canvas.getContext("2d");
+				context.font = "normal 16px monospace"; //16px/16px for font-size/line-height does not need line height if they are the same
+				var textMetrics = context.measureText(" ");
+				charWidth = Math.ceil(textMetrics.width);
+				canvas.width = width * charWidth;
+				canvas.height = height * charHeight;
+				context.fillStyle = "#000000";
+				context.strokeStyle = "#000000";
+				context.fillRect(0, 0, width * charWidth, height * charHeight);
+
+				//textMetrics.width * 80 , height * 25
+				//mat contains list of width*height size with object of utf-8 character, character attributes
+				//then cursor x position, cursor y position, cursor show, and the current character attribute
+				state = {mat : [], curposx: 1, curposy: 1, cursorshow: 1, charattr: 7 << 3};
+				for (var i = 0; i < width * height; i++) { state.mat.push({utf8: 0, flag: 0}); }
+				//termEmuStr("Width: " + (width * charWidth).toString() + " Height: " + (height * 25).toString());
+			}
+			function myEscape(str) { return str.replace(/./g, function (c) { return c.charCodeAt(0) < 32 || c.charCodeAt(0) >= 128 ? "\\x" + c.charCodeAt(0).toString(16) : c; }); }
+			function termEmuStr(str) { document.getElementById("output").innerText += myEscape(str); str.split('').forEach(function (c) { termEmu(c); }); }
+			var inChars = [];
+			function termEmu(c) {
+				if (inChars.length !== 0) {
+					if (inChars.length === 1 && inChars[0] == '\x1b') {
+						if (c == '[') { inChars = ['\x1b', '[']; return; }
+					} else if (inChars.length >= 2 && inChars[0] == '\x1b' && inChars[1] == '[') {
+						var sp = inChars.slice(2);
+						var idx = sp.findIndex(function (el) { return el < '0' || el > '9'; });
+						if (c >= '0' && c <= '9') {
+							inChars.push(c);
+						} else if (idx !== -1) {
+							if (sp[idx] == '?') {
+								if (c == 'l' && sp.length > idx + 2 && sp[idx + 1] == '2' && sp[idx + 2] == '5') { //hide cursor
+									state.cursorshow = 0;
+								} else if (c == 'h' && sp.length > idx + 2 && sp[idx + 1] == '2' && sp[idx + 2] == '5') { //show cursor
+									state.cursorshow = 1;
+								}
+							} else if (sp[idx] == ';') {
+								if (c == 'H') {
+									state.curposy = parseInt(sp.slice(0, idx).join(''), 10);
+									state.curposx = parseInt(sp.slice(idx+1).join(''), 10);
+									if (state.curposy == 0) state.curposy++;
+									if (state.curposx == 0) state.curposx++;
+									if (state.curposy > height) state.curposy = height;
+									if (state.curposx > width) state.curposx = width;
+								}
+							}
+							inChars = [];
+						} else if (c == 'A') { //cursor up
+							inChars = []; if (state.curposy !== 1) state.curposy--;
+						} else if (c == 'B') { //cursor down
+							inChars = []; if (state.curposy !== height) state.curposy++;
+						} else if (c == 'C') { //cursor right
+							inChars = []; if (state.curposx !== width) state.curposx++;
+						} else if (c == 'D') { //cursor left
+							inChars = []; if (state.curposx !== 1) state.curposx--;
+						} else if (c == 'J' && inChars.length == 3 && inChars[2] == '2') { //clear screen
+							inChars = []; for (var i = 0; i < width * height; i++) { state.mat[i].utf8 = ' '; state.mat[i].flag = state.charattr; }
+							var canvas  = document.getElementById("cvs");
+							var context = canvas.getContext("2d");
+							context.fillStyle = "#000000";
+							context.strokeStyle = "#000000";
+  		  	    context.fillRect(0, 0, width * charWidth, height * charHeight);
+						} else if (c == 'K' && inChars.length == 3 && inChars[2] == '2') { //clear line
+							inChars = []; for (var i = 0; i < width; i++) { state.mat[(state.curposy-1) * width + i].utf8 = ' '; state.mat[(state.curposy-1) * width + i].flag = state.charattr; }
+						} else if (c == 'm') { //character attributes off=0, bold=1, blinking=5, reverse color=7, 3x=fore color, 4x=back color
+							inChars = [];
+							var num = parseInt(sp.join(''), 10);
+							if (num == 0) state.charattr &= ~0x7;
+							else if (num == 1) state.charattr |= 1;
+							else if (num == 5) state.charattr |= 2;
+							else if (num == 7) state.charattr |= 4;
+							else if (num >= 30 && num <= 37) state.charattr = state.charattr & ~0x38 | ((num - 30) << 3);
+							else if (num >= 40 && num <= 47) state.charattr = state.charattr & ~0x1C0 | ((num - 40) << 6);
+						} else if (c == 'n' && inChars.length == 3 && inChars[2] == '6') { //get cursor position
+							inChars = [];
+							//send to stdin:
+							stdin += "\x1b[" + state.curposy.toString() + ";" + state.curposx.toString() + "R";
+						} else if (c == '?' || c == ';') { inChars.push(c); }
+						else inChars = [];
+					}
+				} else if (c === '\x1b') { inChars.push(c); return; }
+				else {
+					state.mat[(state.curposy-1) * width + state.curposx-1].flag = state.charattr;
+					state.mat[(state.curposy-1) * width + state.curposx-1].utf8 = c == '\n' ? ' ' : c;
+					var canvas  = document.getElementById("cvs");
+					var context = canvas.getContext("2d");
+					context.font = "normal 16px monospace";
+					context.textAlign = "start";
+					context.textBaseline = "top";
+					context.fillStyle = clrs[(state.charattr >> 6) & 7];
+					context.strokeStyle = clrs[(state.charattr >> 6) & 7];
+	        context.fillRect((state.curposx-1) * charWidth, (state.curposy-1) * charHeight, charWidth, charHeight);
+					context.strokeStyle = clrs[(state.charattr >> 3) & 7];
+					context.fillStyle = clrs[(state.charattr >> 3) & 7];
+	        context.fillText(c, (state.curposx-1) * charWidth, (state.curposy-1) * charHeight);
+	        if (c == '\n' || state.curposx == width) {
+						state.curposx = 1; if (state.curposy !== height) state.curposy++;
+					} else state.curposx++;
+				}
+			}
+			function getch() { if (stdin.length === 0) return -1; var ch = stdin[0]; 
+				document.getElementById("view").innerText += myEscape(ch);
+				stdin = stdin.substr(1); return ch; }
+			var ESCVT100 = "\x1b[";
+			var GET_CURSOR_POS = ESCVT100 + "6n";
+			function SET_CURSOR(x, y) { return ESCVT100 + x.toString() + ";" + y.toString() + "H"; }
+			var SET_MAX_CURSOR = SET_CURSOR(999, 999);
+			var CLEAR_SCREEN = ESCVT100 + "2J";
+			var CLEAR_LINE = ESCVT100 + "2K"
+			var HIDE_CURSOR = ESCVT100 + "?25l";
+			var SHOW_CURSOR = ESCVT100 + "?25h";
+			var CLR_BLACK = 0;
+			var CLR_RED = 1;
+			var CLR_GREEN = 2;
+			var CLR_YELLOW = 3;
+			var CLR_BLUE = 4;
+			var CLR_MAGENTA = 5;
+			var CLR_CYAN = 6;
+			var CLR_WHITE = 7;
+			function SET_FORE_COLOR(x) { return ESCVT100 + "3" + x.toString() + "m"; }
+			function SET_BKGND_COLOR(x) { return ESCVT100 + "4" + x.toString() + "m"; }
+			function SET_CURSOR_STYLE(x) { return ESCVT100 + x.toString() + " q"; } //1 is blinking block (default), 3 is blinking underline, 5 is blinking bar
+		  var world;
+		  var over;
+		  function initSnake() {
+		  	stdin = "";
+		  	document.getElementById("view").innerText = "";
+		  	document.getElementById("output").innerText = "";
+		  	document.getElementById("newgame").disabled = true;
+		  	over = 0;
+		  	world = {snake: [], dir: 0, foodloc: 0, lastfood: 0};
+				world.snake.push({x: Math.floor(width / 2), y: Math.floor(height / 2)});
+				termEmuStr(SET_CURSOR_STYLE(2) + SET_BKGND_COLOR(0) + CLEAR_SCREEN);
+				for (var i = 1; i <= height; i += 1) {
+					termEmuStr(SET_CURSOR(i, 1) + SET_BKGND_COLOR(7) + " ");
+					termEmuStr(SET_CURSOR(i, width) + SET_BKGND_COLOR(7) + " ");
+				}
+				for (var i = 1 + 1; i <= width - 1; i += 1) {
+					termEmuStr(SET_CURSOR(1, i) + SET_BKGND_COLOR(7) + " ");
+					termEmuStr(SET_CURSOR(height, i) + SET_BKGND_COLOR(7) + " ");
+				}
+				termEmuStr(SET_BKGND_COLOR(2) + SET_CURSOR(world.snake[0].y, world.snake[0].x) + " " + SET_CURSOR(world.snake[0].y, world.snake[0].x));
+				snake();
+		  }
+			function snake() {
+				if (over !== 0) return;
+				do {
+					var ch = getch();
+					switch (ch) {
+					case UPARROW: if (world.dir != 2 || world.snake.length == 1) world.dir = 1; break;
+					case DOWNARROW: if (world.dir != 1 || world.snake.length == 1) world.dir = 2; break;
+					case RIGHTARROW: if (world.dir != 4 || world.snake.length == 1) world.dir = 3; break;
+					case LEFTARROW: if (world.dir != 3 || world.snake.length == 1) world.dir = 4; break;
+					}
+					if (world.dir == 0) { setTimeout(snake, 100); return; } //continue;
+					world.lastfood++;
+					if (world.lastfood == 50 && world.foodloc == 0) {
+						do {
+							world.foodloc = Math.floor(Math.random() * (width * height));
+							if (world.foodloc % width == 0 || world.foodloc % width == width - 1 || Math.floor(world.foodloc / width) == 0 || Math.floor(world.foodloc / width) == height - 1) continue;
+							for (i = 0; i < world.snake.length; i++)
+								if (world.snake[i].x == world.foodloc % width +1 && world.snake[i].y == Math.floor(world.foodloc / width) +1) break;
+						} while (i != world.snake.length);
+						termEmuStr(HIDE_CURSOR + SET_CURSOR(Math.floor(world.foodloc / width) +1, world.foodloc % width +1) + SET_BKGND_COLOR(3) + " ");
+					}
+					world.snake.unshift({x: world.snake[0].x, y: world.snake[0].y});
+					if (world.dir == 1) world.snake[0].y--;
+					else if (world.dir == 2) world.snake[0].y++;
+					else if (world.dir == 3) world.snake[0].x++;
+					else if (world.dir == 4) world.snake[0].x--;
+					for (i = world.snake.length - 1; i > 0; i--) if (world.snake[i].x == world.snake[0].x && world.snake[i].y == world.snake[0].y) over = 2; //snake ran into itself
+					if (world.snake[0].x == world.foodloc % width +1 && world.snake[0].y == Math.floor(world.foodloc / width) + 1) { world.lastfood = 0; world.foodloc = 0; }
+					else { var old = world.snake.pop();
+						termEmuStr(HIDE_CURSOR + SET_CURSOR(old.y, old.x) + SET_BKGND_COLOR(0) + " ");
+					}
+					termEmuStr(SET_CURSOR(world.snake[0].y, world.snake[0].x) + SET_BKGND_COLOR(2) + " " + SET_CURSOR(world.snake[0].y, world.snake[0].x) + SHOW_CURSOR);
+					if (world.snake[0].y == 1 || world.snake[0].y == height || world.snake[0].x == 1 || world.snake[0].x == width) over = 2;
+					if (ch == -1 && over === 0) { setTimeout(snake, 100); return; }
+				} while (over === 0);
+				termEmuStr(SET_BKGND_COLOR(0) + SET_FORE_COLOR(7) + SET_CURSOR(height, 1) + CLEAR_LINE + SHOW_CURSOR);
+				document.getElementById("newgame").disabled = false;
+			}
+			function get_screen_info()
+			{
+				termEmuStr(SET_MAX_CURSOR + GET_CURSOR_POS);
+				while (getch() !== '\x1b') {}
+				var result = [];
+				var ch;
+				while ((ch = getch()) != 'R') { result.push(ch); }
+				var res = result.join('').split(/[\[;R]/);
+				height = parseInt(res[1], 10); width = parseInt(res[2], 10);
+			}
+			function main() {
+				initTerm();
+				get_screen_info();
+				initSnake();
+			}
+		</script>
+	</head>
+	<body onload="main()">
+		<canvas id="cvs" width="500" height="150" style="border:1px solid #000000;"></canvas>
+		<button id="newgame" type="button" onclick="initSnake()">New Game</button>
+		<pre id="view" style="width: 500px; max-width: 500px; word-wrap: break-word; height: auto; overflow: auto; max-height: 50px;"></pre>
+		<pre id="output" style="width: 500px; max-width: 500px; word-wrap: break-word; height: auto; overflow: auto; max-height: 100px;"></pre>
+	</body>
+</html>

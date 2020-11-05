@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<title>Snake Game</title>
+		<!-- <script src=""></script> -->
+		<script>
+			var clrs = ["#000000", "#ff0000", "#00ff00", "#ffff00", "#0000ff", "#ff00ff", "00ffff", "#ffffff"];
+			//width, height and charHeight could be user exposed customizable parameters
+			var width = 80; //9*80=720
+			var height = 25; //16*25=625
+			var charHeight = 16;
+			var charWidth = 0;
+			var state;
+			var stdin = "";
+			var LEFTARROW = '\x25';
+			var UPARROW = '\x26';
+			var RIGHTARROW = '\x27';
+			var DOWNARROW = '\x28';
+			document.onkeydown = function (evt) {
+				evt = evt || window.event;
+				key = String.fromCharCode(evt.keyCode);
+				if (key == "X") key = "x";
+				else if (key == LEFTARROW) key = os == "mingw32" ? "àK" : "\x1b[D";
+				else if (key == RIGHTARROW) key = os == "mingw32" ? "àM" : "\x1b[C";
+				else if (key == DOWNARROW) key = os == "mingw32" ? "àP" : "\x1b[B";
+				else if (key == UPARROW) key = os == "mingw32" ? "àH" : "\x1b[A";
+				stdin += key;
+			}
+			function initTerm() {
+				var canvas  = document.getElementById("cvs");
+				var context = canvas.getContext("2d");
+				context.font = "normal 16px monospace"; //16px/16px for font-size/line-height does not need line height if they are the same
+				var textMetrics = context.measureText(" ");
+				charWidth = Math.ceil(textMetrics.width);
+				canvas.width = width * charWidth;
+				canvas.height = height * charHeight;
+				context.fillStyle = "#000000";
+				context.strokeStyle = "#000000";
+				context.fillRect(0, 0, width * charWidth, height * charHeight);
+
+				//textMetrics.width * 80 , height * 25
+				//mat contains list of width*height size with object of utf-8 character, character attributes
+				//then cursor x position, cursor y position, cursor show, and the current character attribute
+				state = {mat : [], curposx: 1, curposy: 1, cursorshow: 1, charattr: 7 << 3};
+				for (var i = 0; i < width * height; i++) { state.mat.push({utf8: 0, flag: 0}); }
+				//termEmuStr("Width: " + (width * charWidth).toString() + " Height: " + (height * 25).toString());
+			}
+			function myEscape(str) { return str.replace(/./g, function (c) { return c.charCodeAt(0) < 32 || c.charCodeAt(0) >= 128 ? "\\x" + c.charCodeAt(0).toString(16) : c; }); }
+			function termEmuStr(str) { document.getElementById("output").innerText += myEscape(str); str.split('').forEach(function (c) { termEmu(c); }); }
+			var inChars = [];
+			function termEmu(c) {
+				if (inChars.length !== 0) {
+					if (inChars.length === 1 && inChars[0] == '\x1b') {
+						if (c == '[') { inChars = ['\x1b', '[']; return; }
+					} else if (inChars.length >= 2 && inChars[0] == '\x1b' && inChars[1] == '[') {
+						var sp = inChars.slice(2);
+						var idx = sp.findIndex(function (el) { return el < '0' || el > '9'; });
+						if (c >= '0' && c <= '9') {
+							inChars.push(c);
+						} else if (idx !== -1) {
+							if (sp[idx] == '?') {
+								if (c == 'l' && sp.length > idx + 2 && sp[idx + 1] == '2' && sp[idx + 2] == '5') { //hide cursor
+									state.cursorshow = 0;
+								} else if (c == 'h' && sp.length > idx + 2 && sp[idx + 1] == '2' && sp[idx + 2] == '5') { //show cursor
+									state.cursorshow = 1;
+								}
+							} else if (sp[idx] == ';') {
+								if (c == 'H') {
+									state.curposy = parseInt(sp.slice(0, idx).join(''), 10);
+									state.curposx = parseInt(sp.slice(idx+1).join(''), 10);
+									if (state.curposy == 0) state.curposy++;
+									if (state.curposx == 0) state.curposx++;
+									if (state.curposy > height) state.curposy = height;
+									if (state.curposx > width) state.curposx = width;
+								}
+							}
+							inChars = [];
+						} else if (c == 'A') { //cursor up
+							inChars = []; if (state.curposy !== 1) state.curposy--;
+						} else if (c == 'B') { //cursor down
+							inChars = []; if (state.curposy !== height) state.curposy++;
+						} else if (c == 'C') { //cursor right
+							inChars = []; if (state.curposx !== width) state.curposx++;
+						} else if (c == 'D') { //cursor left
+							inChars = []; if (state.curposx !== 1) state.curposx--;
+						} else if (c == 'J' && inChars.length == 3 && inChars[2] == '2') { //clear screen
+							inChars = []; for (var i = 0; i < width * height; i++) { state.mat[i].utf8 = ' '; state.mat[i].flag = state.charattr; }
+							var canvas  = document.getElementById("cvs");
+							var context = canvas.getContext("2d");
+							context.fillStyle = "#000000";
+							context.strokeStyle = "#000000";
+  		  	    context.fillRect(0, 0, width * charWidth, height * charHeight);
+						} else if (c == 'K' && inChars.length == 3 && inChars[2] == '2') { //clear line
+							inChars = []; for (var i = 0; i < width; i++) { state.mat[(state.curposy-1) * width + i].utf8 = ' '; state.mat[(state.curposy-1) * width + i].flag = state.charattr; }
+						} else if (c == 'm') { //character attributes off=0, bold=1, blinking=5, reverse color=7, 3x=fore color, 4x=back color
+							inChars = [];
+							var num = parseInt(sp.join(''), 10);
+							if (num == 0) state.charattr &= ~0x7;
+							else if (num == 1) state.charattr |= 1;
+							else if (num == 5) state.charattr |= 2;
+							else if (num == 7) state.charattr |= 4;
+							else if (num >= 30 && num <= 37) state.charattr = state.charattr & ~0x38 | ((num - 30) << 3);
+							else if (num >= 40 && num <= 47) state.charattr = state.charattr & ~0x1C0 | ((num - 40) << 6);
+						} else if (c == 'n' && inChars.length == 3 && inChars[2] == '6') { //get cursor position
+							inChars = [];
+							//send to stdin:
+							stdin += "\x1b[" + state.curposy.toString() + ";" + state.curposx.toString() + "R";
+						} else if (c == '?' || c == ';') { inChars.push(c); }
+						else inChars = [];
+					}
+				} else if (c === '\x1b') { inChars.push(c); return; }
+				else {
+					state.mat[(state.curposy-1) * width + state.curposx-1].flag = state.charattr;
+					state.mat[(state.curposy-1) * width + state.curposx-1].utf8 = c == '\n' ? ' ' : c;
+					var canvas  = document.getElementById("cvs");
+					var context = canvas.getContext("2d");
+					context.font = "normal 16px monospace";
+					context.textAlign = "start";
+					context.textBaseline = "top";
+					context.fillStyle = clrs[(state.charattr >> 6) & 7];
+					context.strokeStyle = clrs[(state.charattr >> 6) & 7];
+	        context.fillRect((state.curposx-1) * charWidth, (state.curposy-1) * charHeight, charWidth, charHeight);
+					context.strokeStyle = clrs[(state.charattr >> 3) & 7];
+					context.fillStyle = clrs[(state.charattr >> 3) & 7];
+	        context.fillText(c, (state.curposx-1) * charWidth, (state.curposy-1) * charHeight);
+	        if (c == '\n' || state.curposx == width) {
+						state.curposx = 1; if (state.curposy !== height) state.curposy++;
+					} else state.curposx++;
+				}
+			}
+			function getch() { if (stdin.length === 0) return -1; var ch = stdin[0]; 
+				document.getElementById("view").innerText += myEscape(ch);
+				stdin = stdin.substr(1); return ch; }
+			var ESCVT100 = "\x1b[";
+			var GET_CURSOR_POS = ESCVT100 + "6n";
+			function SET_CURSOR(x, y) { return ESCVT100 + x.toString() + ";" + y.toString() + "H"; }
+			var SET_MAX_CURSOR = SET_CURSOR(999, 999);
+			var CLEAR_SCREEN = ESCVT100 + "2J";
+			var CLEAR_LINE = ESCVT100 + "2K"
+			var HIDE_CURSOR = ESCVT100 + "?25l";
+			var SHOW_CURSOR = ESCVT100 + "?25h";
+			var CLR_BLACK = 0;
+			var CLR_RED = 1;
+			var CLR_GREEN = 2;
+			var CLR_YELLOW = 3;
+			var CLR_BLUE = 4;
+			var CLR_MAGENTA = 5;
+			var CLR_CYAN = 6;
+			var CLR_WHITE = 7;
+			function SET_FORE_COLOR(x) { return ESCVT100 + "3" + x.toString() + "m"; }
+			function SET_BKGND_COLOR(x) { return ESCVT100 + "4" + x.toString() + "m"; }
+			function SET_CURSOR_STYLE(x) { return ESCVT100 + x.toString() + " q"; } //1 is blinking block (default), 3 is blinking underline, 5 is blinking bar
+			function initSnake() {
+				stdin = "";
+				document.getElementById("view").innerText = "";
+				document.getElementById("output").innerText = "";
+				document.getElementById("newgame").disabled = true;
+				aborthandler = null, abort = false, aborted = false;
+				module = "jAgda.snake"; exports = exp[module];
+				exp["jAgda.snake"]["main"](function (x0) { return {}; });
+			}
+			function abortSnake() {
+				abort = true;
+			}
+			function get_screen_info()
+			{
+				termEmuStr(SET_MAX_CURSOR + GET_CURSOR_POS);
+				while (getch() !== '\x1b') {}
+				var result = [];
+				var ch;
+				while ((ch = getch()) != 'R') { result.push(ch); }
+				var res = result.join('').split(/[\[;R]/);
+				height = parseInt(res[1], 10); width = parseInt(res[2], 10);
+			}
+			var exports = {};
+			var curmodule = {};
+			var exp = {};
+			var abort = false, aborted = false;
+			var aborthandler = null;
+			var depOrder = ["biginteger", "agda-rts", "jAgda.Agda.Builtin.Bool", "jAgda.Agda.Builtin.Char", "jAgda.Agda.Builtin.Char.Properties", "jAgda.Agda.Builtin.Coinduction", "jAgda.Agda.Builtin.Equality", "jAgda.Agda.Builtin.Float", "jAgda.Agda.Builtin.Float.Properties", "jAgda.Agda.Builtin.Int", "jAgda.Agda.Builtin.IO", "jAgda.Agda.Builtin.List", "jAgda.Agda.Builtin.Nat", "jAgda.Agda.Builtin.Reflection", "jAgda.Agda.Builtin.Reflection.Properties", "jAgda.Agda.Builtin.Sigma", "jAgda.Agda.Builtin.Size", "jAgda.Agda.Builtin.Strict", "jAgda.Agda.Builtin.String", "jAgda.Agda.Builtin.String.Properties", "jAgda.Agda.Builtin.Unit", "jAgda.Agda.Builtin.Word", "jAgda.Agda.Builtin.Word.Properties", "jAgda.Agda.Primitive", "jAgda.Relation.Binary.Definitions", "jAgda.Data.Empty.Irrelevant", "jAgda.Relation.Nullary", "jAgda.Data.Bool.Base", "jAgda.Relation.Nullary.Reflects", "jAgda.Data.Sum.Base", "jAgda.Data.These.Base", "jAgda.Level", "jAgda.Data.Maybe.Base", "jAgda.Relation.Nullary.Decidable.Core", "jAgda.Relation.Binary.Consequences", "jAgda.Relation.Binary.Structures", "jAgda.Relation.Binary.Bundles", "jAgda.Relation.Binary.Reasoning.Base.Partial", "jAgda.Relation.Binary.Reasoning.PartialSetoid", "jAgda.Algebra.Consequences.Setoid", "jAgda.Algebra.Structures", "jAgda.Algebra.Bundles", "jAgda.Algebra.Consequences.Base", "jAgda.Algebra.Consequences.Propositional", "jAgda.Algebra.Construct.LiftedChoice", "jAgda.Relation.Binary.Construct.Converse", "jAgda.Algebra.Construct.NaturalChoice.Min", "jAgda.Algebra.Construct.NaturalChoice.Max", "jAgda.Algebra.Core", "jAgda.Algebra.Definitions", "jAgda.Algebra", "jAgda.Algebra.Morphism.Definitions", "jAgda.Algebra.Morphism", "jAgda.Relation.Binary.Morphism.Structures", "jAgda.Algebra.Morphism.Structures", "jAgda.Data.Nat.Base", "jAgda.Data.Empty", "jAgda.Data.Product", "jAgda.Data.Fin.Base", "jAgda.Data.Vec.Base", "jAgda.Relation.Nullary.Product", "jAgda.Relation.Nullary.Sum", "jAgda.Category.Functor", "jAgda.Category.Applicative.Indexed", "jAgda.Category.Monad.Indexed", "jAgda.Relation.Nullary.Negation", "jAgda.Relation.Unary.Properties", "jAgda.Data.List.Base", "jAgda.Data.Table.Base", "jAgda.Algebra.Operations.CommutativeMonoid", "jAgda.Algebra.Operations.Ring", "jAgda.Algebra.Operations.Semiring", "jAgda.Algebra.Properties.Group", "jAgda.Algebra.Properties.AbelianGroup", "jAgda.Relation.Binary.Lattice", "jAgda.Relation.Binary.Construct.NaturalOrder.Left", "jAgda.Relation.Binary.Construct.NonStrictToStrict", "jAgda.Relation.Binary.Properties.Preorder", "jAgda.Relation.Binary.Properties.Poset", "jAgda.Algebra.Properties.Semilattice", "jAgda.Relation.Binary.Indexed.Heterogeneous.Structures", "jAgda.Relation.Binary.Indexed.Heterogeneous.Bundles", "jAgda.Relation.Binary.Indexed.Heterogeneous.Construct.Trivial", "jAgda.Function.Equality", "jAgda.Relation.Binary.PropositionalEquality.Properties", "jAgda.Relation.Binary.PropositionalEquality", "jAgda.Function.Equivalence", "jAgda.Algebra.Properties.Lattice", "jAgda.Algebra.Properties.DistributiveLattice", "jAgda.Algebra.Properties.BooleanAlgebra", "jAgda.Algebra.Properties.Ring", "jAgda.Algebra.Solver.Ring.AlmostCommutativeRing", "jAgda.Algebra.Solver.Ring.Lemmas", "jAgda.Relation.Binary.Reflection", "jAgda.Algebra.Solver.Ring", "jAgda.Algebra.Solver.Ring.Simple", "jAgda.Algebra.Structures.Biased", "jAgda.Axiom.Extensionality.Propositional", "jAgda.Axiom.UniquenessOfIdentityProofs", "jAgda.Category.Applicative", "jAgda.Category.Comonad", "jAgda.Category.Monad", "jAgda.Codata.Thunk", "jAgda.Codata.Conat", "jAgda.Data.Bool.Properties", "jAgda.Data.List.NonEmpty", "jAgda.Relation.Binary.PropositionalEquality.Core", "jAgda.Relation.Binary.PropositionalEquality.Algebra", "jAgda.Function.Metric.Structures", "jAgda.Function.Metric.Nat.Bundles", "jAgda.Function.Injection", "jAgda.Function.Structures", "jAgda.Function.Bundles", "jAgda.Relation.Nullary.Decidable", "jAgda.Relation.Binary.Reasoning.Base.Triple", "jAgda.Data.Nat.Properties", "jAgda.Data.List.Relation.Unary.Any", "jAgda.Data.List.Relation.Unary.All", "jAgda.Data.List.Properties", "jAgda.Function.LeftInverse", "jAgda.Function.Surjection", "jAgda.Function.Bijection", "jAgda.Function.Inverse", "jAgda.Function.HalfAdjointEquivalence", "jAgda.Function.Related", "jAgda.Data.Product.Function.Dependent.Propositional", "jAgda.Data.List.Relation.Unary.AllPairs.Core", "jAgda.Data.List.Relation.Binary.Pointwise", "jAgda.Data.List.Relation.Binary.Equality.Setoid", "jAgda.Data.List.Relation.Binary.Equality.Propositional", "jAgda.Data.Product.Properties", "jAgda.Data.Product.Relation.Binary.Pointwise.NonDependent", "jAgda.Data.Product.Function.NonDependent.Setoid", "jAgda.Data.Product.Function.NonDependent.Propositional", "jAgda.Data.List.Membership.Setoid", "jAgda.Data.List.Categorical", "jAgda.Data.List.Membership.Propositional", "jAgda.Data.List.Membership.Propositional.Properties.Core", "jAgda.Data.Sum.Relation.Binary.Pointwise", "jAgda.Data.Sum.Function.Setoid", "jAgda.Data.Sum.Function.Propositional", "jAgda.Data.List.Relation.Unary.Any.Properties", "jAgda.Data.Empty.Polymorphic", "jAgda.Function.Related.TypeIsomorphisms", "jAgda.Data.List.Membership.Setoid.Properties", "jAgda.Data.List.Membership.Propositional.Properties", "jAgda.Data.List.Extrema.Core", "jAgda.Data.List.Extrema", "jAgda.Data.Maybe.Relation.Unary.All", "jAgda.Data.List.Relation.Unary.All.Properties", "jAgda.Data.Vec.Bounded.Base", "jAgda.Codata.Delay", "jAgda.Data.BoundedVec.Inefficient", "jAgda.Data.BoundedVec", "jAgda.Codata.Stream", "jAgda.Codata.Cowriter", "jAgda.Codata.Colist", "jAgda.Relation.Binary.Reasoning.Base.Double", "jAgda.Codata.Musical.Conat", "jAgda.Data.Maybe.Relation.Unary.Any", "jAgda.Relation.Binary.Construct.FromRel", "jAgda.Codata.Musical.Colist", "jAgda.Codata.Musical.Costring", "jAgda.Codata.Musical.Notation", "jAgda.Data.Bool", "jAgda.Data.Char.Base", "jAgda.Data.Char", "jAgda.Relation.Binary.Construct.On", "jAgda.Data.Char.Properties", "jAgda.Data.Nat.DivMod.Core", "jAgda.Data.Nat.DivMod", "jAgda.Induction", "jAgda.Induction.WellFounded", "jAgda.Data.Digit", "jAgda.Data.Fin", "jAgda.Data.Fin.Patterns", "jAgda.Data.Nat.Properties.Core", "jAgda.Data.Fin.Properties", "jAgda.Data.Float.Base", "jAgda.Data.Float", "jAgda.Data.Word.Properties", "jAgda.Data.Float.Properties", "jAgda.Data.List", "jAgda.Data.List.Kleene.Base", "jAgda.Data.List.Kleene", "jAgda.Data.List.Membership.DecSetoid", "jAgda.Data.List.Membership.DecPropositional", "jAgda.Data.List.Relation.Binary.Lex.Core", "jAgda.Data.List.Relation.Binary.Lex.Strict", "jAgda.Data.List.Relation.Binary.Subset.Propositional", "jAgda.Data.List.Relation.Binary.Subset.Setoid", "jAgda.Data.List.Relation.Unary.AllPairs", "jAgda.Data.List.Relation.Unary.Unique.Setoid", "jAgda.Function.Identity.Categorical", "jAgda.Data.Maybe.Categorical", "jAgda.Data.Maybe", "jAgda.Data.Nat.Divisibility.Core", "jAgda.Data.Nat.GeneralisedArithmetic", "jAgda.Data.Nat.Induction", "jAgda.Data.Nat", "jAgda.Data.String.Properties", "jAgda.Reflection.Name", "jAgda.Reflection.Meta", "jAgda.Reflection.Literal", "jAgda.Reflection.Argument.Relevance", "jAgda.Reflection.Argument.Visibility", "jAgda.Reflection.Argument.Information", "jAgda.Reflection.Argument", "jAgda.Reflection.Pattern", "jAgda.Reflection.Abstraction", "jAgda.Reflection.Term", "jAgda.Data.Nat.Reflection", "jAgda.Data.Nat.Show", "jAgda.Data.Nat.Solver", "jAgda.Tactic.RingSolver.Core.NatSet", "jAgda.Tactic.RingSolver.Core.ReflectionHelp", "jAgda.Tactic.RingSolver", "jAgda.Tactic.RingSolver.Core.AlmostCommutativeRing", "jAgda.Data.Nat.Tactic.RingSolver", "jAgda.Data.String.Base", "jAgda.Data.String", "jAgda.Data.Sum", "jAgda.Data.Sum.Properties", "jAgda.Data.Unit.Base", "jAgda.Data.Unit.Properties", "jAgda.Data.Unit", "jAgda.Data.Unit.Polymorphic.Base", "jAgda.Data.Unit.Polymorphic", "jAgda.Data.Unit.Polymorphic.Properties", "jAgda.Data.Vec", "jAgda.Data.Vec.Bounded", "jAgda.Data.Vec.N-ary", "jAgda.Data.Word.Base", "jAgda.Data.Word", "jAgda.Function.Base", "jAgda.Function.Core", "jAgda.Function.Definitions.Core1", "jAgda.Function.Definitions.Core2", "jAgda.Function.Definitions", "jAgda.Function", "jAgda.Function.Metric.Bundles", "jAgda.Function.Metric.Core", "jAgda.Function.Metric.Definitions", "jAgda.Function.Metric.Nat.Core", "jAgda.Function.Metric.Nat.Definitions", "jAgda.Function.Metric.Nat", "jAgda.Function.Metric.Nat.Structures", "jAgda.IO.Primitive", "jAgda.IO", "jAgda.Reflection.TypeChecking.Monad.Syntax", "jAgda.Relation.Binary.Construct.Intersection", "jAgda.Relation.Binary.Core", "jAgda.Relation.Binary.Indexed.Heterogeneous.Core", "jAgda.Relation.Binary.Indexed.Heterogeneous.Definitions", "jAgda.Relation.Binary.Indexed.Heterogeneous", "jAgda.Relation.Binary", "jAgda.Relation.Binary.Morphism.Definitions", "jAgda.Relation.Binary.Properties.TotalOrder", "jAgda.Relation.Binary.Properties.DecTotalOrder", "jAgda.Relation.Binary.Properties.Setoid", "jAgda.Relation.Binary.Reasoning.Base.Single", "jAgda.Relation.Binary.Reasoning.PartialOrder", "jAgda.Relation.Binary.Reasoning.Preorder", "jAgda.Relation.Binary.Reasoning.Setoid", "jAgda.Relation.Nullary.Indexed", "jAgda.Relation.Unary", "jAgda.Size", "jAgda.snake", "jAgda.Strict", "jAgda.Tactic.RingSolver.Core.Expression", "jAgda.Tactic.RingSolver.Core.Polynomial.Parameters", "jAgda.Tactic.RingSolver.Core.Polynomial.Base", "jAgda.Tactic.RingSolver.Core.Polynomial.Semantics", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Lemmas", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Addition", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Constants", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Multiplication", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Exponentiation", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Negation", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Variables", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism", "jAgda.Tactic.RingSolver.Core.Polynomial.Reasoning", "jAgda.Tactic.RingSolver.NonReflective"];
+			var emuDepOrder = ["biginteger", "agda-rts", "jAgda.Agda.Builtin.Bool", "jAgda.Agda.Builtin.Char", "jAgda.Agda.Builtin.Char.Properties", "jAgda.Agda.Builtin.Coinduction", "jAgda.Agda.Builtin.Equality", "jAgda.Agda.Builtin.Float", "jAgda.Agda.Builtin.Float.Properties", "jAgda.Agda.Builtin.Int", "jAgda.Agda.Builtin.IO", "jAgda.Agda.Builtin.List", "jAgda.Agda.Builtin.Nat", "jAgda.Agda.Builtin.Reflection", "jAgda.Agda.Builtin.Reflection.Properties", "jAgda.Agda.Builtin.Sigma", "jAgda.Agda.Builtin.Size", "jAgda.Agda.Builtin.Strict", "jAgda.Agda.Builtin.String", "jAgda.Agda.Builtin.String.Properties", "jAgda.Agda.Builtin.Unit", "jAgda.Agda.Builtin.Word", "jAgda.Agda.Builtin.Word.Properties", "jAgda.Agda.Primitive", "jAgda.Data.Empty.Irrelevant", "jAgda.Relation.Nullary", "jAgda.Relation.Nullary.Reflects", "jAgda.Data.Sum.Base", "jAgda.Relation.Binary.Definitions", "jAgda.Data.These.Base", "jAgda.Level", "jAgda.Data.Bool.Base", "jAgda.Data.Maybe.Base", "jAgda.Relation.Nullary.Decidable.Core", "jAgda.Relation.Binary.Consequences", "jAgda.Relation.Binary.Structures", "jAgda.Relation.Binary.Bundles", "jAgda.Relation.Binary.Reasoning.Base.Partial", "jAgda.Relation.Binary.Reasoning.PartialSetoid", "jAgda.Algebra.Consequences.Setoid", "jAgda.Algebra.Structures", "jAgda.Algebra.Bundles", "jAgda.Algebra.Consequences.Base", "jAgda.Algebra.Consequences.Propositional", "jAgda.Algebra.Construct.LiftedChoice", "jAgda.Relation.Binary.Construct.Converse", "jAgda.Algebra.Construct.NaturalChoice.Min", "jAgda.Algebra.Construct.NaturalChoice.Max", "jAgda.Algebra.Core", "jAgda.Algebra.Definitions", "jAgda.Algebra", "jAgda.Algebra.Morphism.Definitions", "jAgda.Algebra.Morphism", "jAgda.Relation.Binary.Morphism.Structures", "jAgda.Algebra.Morphism.Structures", "jAgda.Data.Product", "jAgda.Data.Nat.Base", "jAgda.Data.Empty", "jAgda.Data.Fin.Base", "jAgda.Data.Vec.Base", "jAgda.Category.Functor", "jAgda.Category.Applicative.Indexed", "jAgda.Category.Monad.Indexed", "jAgda.Relation.Nullary.Negation", "jAgda.Relation.Nullary.Product", "jAgda.Relation.Nullary.Sum", "jAgda.Relation.Unary.Properties", "jAgda.Data.List.Base", "jAgda.Data.Table.Base", "jAgda.Algebra.Operations.CommutativeMonoid", "jAgda.Algebra.Operations.Ring", "jAgda.Algebra.Operations.Semiring", "jAgda.Algebra.Properties.Group", "jAgda.Algebra.Properties.AbelianGroup", "jAgda.Relation.Binary.Lattice", "jAgda.Relation.Binary.Construct.NaturalOrder.Left", "jAgda.Relation.Binary.Properties.Preorder", "jAgda.Relation.Binary.Construct.NonStrictToStrict", "jAgda.Relation.Binary.Properties.Poset", "jAgda.Algebra.Properties.Semilattice", "jAgda.Relation.Binary.Indexed.Heterogeneous.Structures", "jAgda.Relation.Binary.Indexed.Heterogeneous.Bundles", "jAgda.Relation.Binary.Indexed.Heterogeneous.Construct.Trivial", "jAgda.Function.Equality", "jAgda.Relation.Binary.PropositionalEquality.Properties", "jAgda.Relation.Binary.PropositionalEquality", "jAgda.Function.Equivalence", "jAgda.Algebra.Properties.Lattice", "jAgda.Algebra.Properties.DistributiveLattice", "jAgda.Algebra.Properties.BooleanAlgebra", "jAgda.Algebra.Properties.Ring", "jAgda.Algebra.Solver.Ring.AlmostCommutativeRing", "jAgda.Algebra.Solver.Ring.Lemmas", "jAgda.Relation.Binary.Reflection", "jAgda.Algebra.Solver.Ring", "jAgda.Algebra.Solver.Ring.Simple", "jAgda.Algebra.Structures.Biased", "jAgda.Axiom.Extensionality.Propositional", "jAgda.Axiom.UniquenessOfIdentityProofs", "jAgda.Category.Applicative", "jAgda.Category.Comonad", "jAgda.Category.Monad", "jAgda.Codata.Thunk", "jAgda.Codata.Conat", "jAgda.Codata.Stream", "jAgda.Data.List.Relation.Unary.Any", "jAgda.Data.List.Relation.Unary.All", "jAgda.Relation.Binary.Reasoning.Base.Triple", "jAgda.Function.Metric.Structures", "jAgda.Function.Metric.Nat.Bundles", "jAgda.Function.Injection", "jAgda.Function.Structures", "jAgda.Function.Bundles", "jAgda.Relation.Nullary.Decidable", "jAgda.Data.Bool.Properties", "jAgda.Relation.Binary.PropositionalEquality.Core", "jAgda.Relation.Binary.PropositionalEquality.Algebra", "jAgda.Data.Nat.Properties", "jAgda.Data.List.Properties", "jAgda.Data.List.Membership.Setoid", "jAgda.Function.LeftInverse", "jAgda.Function.Surjection", "jAgda.Function.Bijection", "jAgda.Function.Inverse", "jAgda.Data.List.Membership.Propositional", "jAgda.Data.List.Membership.Propositional.Properties.Core", "jAgda.Function.Related", "jAgda.Data.Product.Properties", "jAgda.Data.Product.Relation.Binary.Pointwise.NonDependent", "jAgda.Data.Product.Function.NonDependent.Setoid", "jAgda.Data.Product.Function.NonDependent.Propositional", "jAgda.Data.List.Relation.Unary.AllPairs.Core", "jAgda.Data.List.Relation.Binary.Pointwise", "jAgda.Data.List.Relation.Binary.Equality.Setoid", "jAgda.Data.Sum.Relation.Binary.Pointwise", "jAgda.Data.Sum.Function.Setoid", "jAgda.Data.Sum.Function.Propositional", "jAgda.Function.HalfAdjointEquivalence", "jAgda.Data.Product.Function.Dependent.Propositional", "jAgda.Data.List.Categorical", "jAgda.Data.List.Relation.Unary.Any.Properties", "jAgda.Data.List.Membership.Setoid.Properties", "jAgda.Data.Empty.Polymorphic", "jAgda.Function.Related.TypeIsomorphisms", "jAgda.Data.List.Relation.Binary.Equality.Propositional", "jAgda.Data.List.Membership.Propositional.Properties", "jAgda.Data.List.Extrema.Core", "jAgda.Data.List.Extrema", "jAgda.Data.Maybe.Relation.Unary.All", "jAgda.Data.List.Relation.Unary.All.Properties", "jAgda.Data.Vec.Bounded.Base", "jAgda.Data.BoundedVec.Inefficient", "jAgda.Data.BoundedVec", "jAgda.Codata.Delay", "jAgda.Codata.Cowriter", "jAgda.Data.List.NonEmpty", "jAgda.Codata.Colist", "jAgda.Data.Maybe.Relation.Unary.Any", "jAgda.Relation.Binary.Reasoning.Base.Double", "jAgda.Codata.Musical.Conat", "jAgda.Relation.Binary.Construct.FromRel", "jAgda.Codata.Musical.Colist", "jAgda.Codata.Musical.Costring", "jAgda.Codata.Musical.Notation", "jAgda.Data.Bool", "jAgda.Data.Char.Base", "jAgda.Data.Char", "jAgda.Relation.Binary.Construct.On", "jAgda.Data.Char.Properties", "jAgda.Induction", "jAgda.Induction.WellFounded", "jAgda.Data.Nat.DivMod.Core", "jAgda.Data.Nat.DivMod", "jAgda.Data.Digit", "jAgda.Data.Fin", "jAgda.Data.Fin.Patterns", "jAgda.Data.Nat.Properties.Core", "jAgda.Data.Fin.Properties", "jAgda.Data.Float.Base", "jAgda.Data.Float", "jAgda.Data.Word.Properties", "jAgda.Data.Float.Properties", "jAgda.Data.List", "jAgda.Data.List.Kleene.Base", "jAgda.Data.List.Kleene", "jAgda.Data.List.Membership.DecSetoid", "jAgda.Data.List.Membership.DecPropositional", "jAgda.Data.List.Relation.Binary.Lex.Core", "jAgda.Data.List.Relation.Binary.Lex.Strict", "jAgda.Data.List.Relation.Binary.Subset.Propositional", "jAgda.Data.List.Relation.Binary.Subset.Setoid", "jAgda.Data.List.Relation.Unary.AllPairs", "jAgda.Data.List.Relation.Unary.Unique.Setoid", "jAgda.Function.Identity.Categorical", "jAgda.Data.Maybe.Categorical", "jAgda.Data.Maybe", "jAgda.Data.Nat.Divisibility.Core", "jAgda.Data.Nat.GeneralisedArithmetic", "jAgda.Data.Nat.Induction", "jAgda.Data.Nat", "jAgda.Reflection.Meta", "jAgda.Reflection.Name", "jAgda.Reflection.Argument.Visibility", "jAgda.Reflection.Argument.Relevance", "jAgda.Reflection.Argument.Information", "jAgda.Reflection.Argument", "jAgda.Data.String.Properties", "jAgda.Reflection.Literal", "jAgda.Reflection.Pattern", "jAgda.Reflection.Abstraction", "jAgda.Reflection.Term", "jAgda.Data.Nat.Reflection", "jAgda.Data.Nat.Show", "jAgda.Data.Nat.Solver", "jAgda.Tactic.RingSolver.Core.NatSet", "jAgda.Tactic.RingSolver.Core.ReflectionHelp", "jAgda.Tactic.RingSolver", "jAgda.Tactic.RingSolver.Core.AlmostCommutativeRing", "jAgda.Data.Nat.Tactic.RingSolver", "jAgda.Data.String.Base", "jAgda.Data.String", "jAgda.Data.Sum", "jAgda.Data.Sum.Properties", "jAgda.Data.Unit.Base", "jAgda.Data.Unit.Properties", "jAgda.Data.Unit", "jAgda.Data.Unit.Polymorphic.Base", "jAgda.Data.Unit.Polymorphic", "jAgda.Data.Unit.Polymorphic.Properties", "jAgda.Data.Vec", "jAgda.Data.Vec.Bounded", "jAgda.Data.Vec.N-ary", "jAgda.Data.Word.Base", "jAgda.Data.Word", "jAgda.IO.Primitive", "jAgda.IO", "jAgda.emuterm", "jAgda.Function.Base", "jAgda.Function.Core", "jAgda.Function.Definitions.Core1", "jAgda.Function.Definitions.Core2", "jAgda.Function.Definitions", "jAgda.Function", "jAgda.Function.Metric.Bundles", "jAgda.Function.Metric.Core", "jAgda.Function.Metric.Definitions", "jAgda.Function.Metric.Nat.Core", "jAgda.Function.Metric.Nat.Definitions", "jAgda.Function.Metric.Nat", "jAgda.Function.Metric.Nat.Structures", "jAgda.Reflection.TypeChecking.Monad.Syntax", "jAgda.Relation.Binary.Construct.Intersection", "jAgda.Relation.Binary.Core", "jAgda.Relation.Binary.Indexed.Heterogeneous.Core", "jAgda.Relation.Binary.Indexed.Heterogeneous.Definitions", "jAgda.Relation.Binary.Indexed.Heterogeneous", "jAgda.Relation.Binary", "jAgda.Relation.Binary.Morphism.Definitions", "jAgda.Relation.Binary.Properties.TotalOrder", "jAgda.Relation.Binary.Properties.DecTotalOrder", "jAgda.Relation.Binary.Properties.Setoid", "jAgda.Relation.Binary.Reasoning.Base.Single", "jAgda.Relation.Binary.Reasoning.PartialOrder", "jAgda.Relation.Binary.Reasoning.Preorder", "jAgda.Relation.Binary.Reasoning.Setoid", "jAgda.Relation.Nullary.Indexed", "jAgda.Relation.Unary", "jAgda.Size", "jAgda.Strict", "jAgda.Tactic.RingSolver.Core.Expression", "jAgda.Tactic.RingSolver.Core.Polynomial.Parameters", "jAgda.Tactic.RingSolver.Core.Polynomial.Base", "jAgda.Tactic.RingSolver.Core.Polynomial.Semantics", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Lemmas", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Addition", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Constants", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Multiplication", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Exponentiation", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Variables", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism.Negation", "jAgda.Tactic.RingSolver.Core.Polynomial.Homomorphism", "jAgda.Tactic.RingSolver.Core.Polynomial.Reasoning", "jAgda.Tactic.RingSolver.NonReflective"];
+			var order = [
+				//{deps: emuDepOrder, path: "emuterm", main: "jAgda.emuterm"},
+				{deps: depOrder, path: "snakejs", main: "jAgda.snake"}];
+			var os = false ? "linux" : "mingw32";
+			var loading = [0, 0];
+			function main() {
+				initTerm();
+				get_screen_info();
+				//requirejs.config({baseUrl: "snakejs"})
+				onloadfunc();
+				//require("jAgda.snake");
+			}
+			function onloadfunc() {
+				if (loading[0] === order.length) return;
+				if (order[loading[0]].deps.length === loading[1]) {
+					loading = [loading[0] + 1, 0];
+					if (loading[0] === order.length) return;
+				}
+				mod = order[loading[0]].deps[loading[1]]; loading[1] += 1; require(mod);
+			}
+			function isFunction(obj) { return !!(obj && obj.constructor && obj.call && obj.apply); }
+			function wrapReturn(fc, module, binding) {
+				reservedWrapFunction = function(...args) {
+					//if (module === "jAgda.snake") console.log(fc);
+					for (i = 0; i < args.length; i++) {
+						if (isFunction(args[i]) && args[i].name !== "reservedWrapFunction") { args[i] = wrapReturn(args[i], curmodule, this); }
+						else if (typeof args[i] === "object" && args[i].constructor == Object)
+							Object.keys(args[i]).forEach((k) => wrapFunc(k, args[i], curmodule));
+					}
+					var e = exports, m = curmodule; exports = exp[module], curmodule = module; var ret = fc.call(binding, ...args); exports = e, curmodule = m;
+					if (isFunction(ret) && ret.name !== "reservedWrapFunction") return wrapReturn(ret, module, this);
+					else if (typeof ret === "object" && ret.constructor == Object)
+						Object.keys(ret).forEach((k) => wrapFunc(k, ret, module));
+					return ret;
+				};
+				return reservedWrapFunction;
+			}
+			function wrapFunc(key, curexp, module) {
+				if (isFunction(curexp[key]) && curexp[key].name !== "reservedWrapFunction") {
+					var fc = curexp[key]; curexp[key] = wrapReturn(fc, module, curexp);
+				} else if (typeof curexp[key] === "object" && curexp[key].constructor == Object) {
+					Object.keys(curexp[key]).forEach((k) => wrapFunc(k, curexp[key], module));
+				}
+			}
+			function toColist(s) {
+				//console.log(s);
+				return exp["jAgda.Codata.Musical.Colist"]["fromList"](exp["agda-rts"].primIntegerFromString("0"))(exp["agda-rts"].primIntegerFromString("0"))(s);
+				//if (s.length == 0) return wrapReturn(exp[module]["Colist"]["[]"], module, this);
+				//else return wrapReturn(exp[module]["Colist"]["_∷_"](s[0])(toColist(s.slice(1))), module, this);
+			}
+			function fromColist(c) {
+				chars = Array();
+				c({
+					"[]": function () {
+					  return;
+					},
+					"_∷_": function (x6, x7) {
+					  chars.push(x6);
+					  exp["jAgda.Agda.Builtin.Coinduction"]["♭"](x7)(this);
+					}
+				  });
+				return chars;
+			}
+			function require(module) {
+				//exports = { ...exports };
+				//window.exports = { ...window.exports};
+				//if (exp[module] === null) return exp[module];
+				//console.log(module, exports[module]);
+				if (exp[module] !== undefined) return exp[module];
+				exp[module] = null;
+				curmodule = module;
+				exports = {};
+				//only need to overload the GHC directives which are undefined in jAgda.snake.js and the IO primitives which are undefined in jAgda.IO.Primitive
+				if (module === order[loading[0]].main) {
+					var handler = {
+						get: function(obj, prop) {
+							console.log(prop);
+							if (prop === "main") {// && module === "jAgda.snake") {
+								return async function(x0) {
+									await obj[prop]({
+									  "_>>=_": async function (x3, x4, x5) {
+										//console.log(abort, aborted, x3, x4, x5);
+										if (aborted) return;
+										if (abort) { abort = false; r = await aborthandler(this); aborted = true; return r; }
+										z = await x4(this)
+										if (aborted) return;
+										return await x5(z)(this); //recursion will break stack depth
+									  },
+									  "return": async function (x3) {
+										//console.log(abort, aborted, x3);
+										if (aborted) return;
+										return await x3;
+									  }
+									});
+									document.getElementById("newgame").disabled = false;
+							}; }
+							if (prop === "os") { return toColist(exp["jAgda.Agda.Builtin.String"]["primStringToList"](os)); } //System.Info.os == "linux" || System.Info.os == "mingw32"
+							if (prop === "hGetChar") { return function(x0) { z = getch(); return exp["jAgda.IO"]["IO"]["return"](z === -1 ? String.fromCharCode(-1) : z); }; }
+							if (prop === "newIORef") { return function(x0) { return function(x1) { return exp["jAgda.IO"]["IO"]["return"]({"IORef": x1}); }; }; }
+							if (prop === "nullFunPtr") { return function(x0) { return {"FunPtr": "NullAddr"}; }; }
+							if (prop === "mkHandler") { return function(x0) { return exp["jAgda.IO"]["IO"]["return"]({"FunPtr": x0}); }; }
+							if (prop === "writeIORef") { return function(x0) { return function(x1) { return function(x2) { x1["IORef"] = x2; return exp["jAgda.IO"]["IO"]["return"](exp["agda-rts"].primIntegerFromString("0")); }; }; }; }
+							if (prop === "hSetEcho") { return function(x0) { return function(x1) { return exp["jAgda.IO"]["IO"]["return"](exp["agda-rts"].primIntegerFromString("0")); }; }; }
+							if (prop === "system") { return function(x0) { return exp["jAgda.IO"]["IO"]["return"]("ExitSuccess"); }; }
+							if (prop === "readIORef") { return function(x0) { return function(x1) { return exp["jAgda.IO"]["IO"]["return"](x1.IORef); }; }; }
+							if (prop === "c_SetConsoleCtrlHandler") { return function(x0) { return function(x1) { aborthandler = x1 ? function (io) { return x0["FunPtr"]()(io); } : undefined; return exp["jAgda.IO"]["IO"]["return"](exp["jAgda.Agda.Builtin.Bool"]["Bool"]["true"]); }; }; }
+							if (prop === "hSetBuffering") { return function(x0) { return function(x1) { return exp["jAgda.IO"]["IO"]["return"](exp["agda-rts"].primIntegerFromString("0")); }; }; }
+							if (prop === "hIsTerminalDevice") { return function(x0) { return exp["jAgda.IO"]["IO"]["return"](exp["jAgda.Agda.Builtin.Bool"]["Bool"]["true"]); }; }
+							if (prop === "fromEnum") { return function(x0) { return function(x1) { return function(x2) { return x2(x1); }; }; }; }
+							if (prop === "chr") { return function(x0) { return String.fromCharCode(x0); }; }
+							if (prop === "EnumCInt") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "c_getch") { return function() { z = getch(); return exp["jAgda.IO"]["IO"]["return"](z === -1 ? -1 : z.charCodeAt(0)); }; }
+							if (prop === "getPOSIXTime") { return function() { return exp["jAgda.IO"]["IO"]["return"](Date.now()); }; }
+							if (prop === "RmkStdGen") { return function(x0) { return Math.random; }; } //GHC System.Random.StdGen uses SplitMix implementation, JavaScript default cannot be seeded
+							if (prop === "round") { return function(x0) { return function(x1) { return function(x2) { return function (x3) { return function(x4) { return x3.lift(x4(x2)); }; }; }; }; }; }
+							if (prop === "RealFracPOSIXTime") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "IntegralInt") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "c_kbhit") { return function() { return function() { return exp["jAgda.IO"]["IO"]["return"](stdin.length !== 0 ? 1 : 0); }; }; }
+							if (prop === "toInteger") { return function(x0) { return function(x1) { return function(x2) { return exp["biginteger"].BigInteger(x2(x1)); }; }; }; }
+							if (prop === "threadDelay") { return function(x0) { return async function(x1) { var timeout = x0(exp[module]["NumInt"]).toJSValue() / 1000;
+								//e = new Date().getTime() + timeout; while (new Date().getTime() <= e) {}
+								var sleep = await new Promise(r => setTimeout(r, timeout))
+								return exp["jAgda.IO"]["IO"]["return"](exp["agda-rts"].primIntegerFromString("0")); }; }; }
+							if (prop === "fromInteger") { return function(x0) { return function(x1) { return function(x2) { return x1.lift(x2); }; }; }; }
+							if (prop === "NumInt") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "RrandomR") { return function(x0) { return function(x1) { return function(x2) { return function(x3) { return function(x4) { return function(x5) { var min = obj["Pair"]["fst``"](x4).toJSValue(), max = obj["Pair"]["snd``"](x4).toJSValue(); var z = Math.floor(x5(exp[module]["RandomGenStdGen"]) * (max - min + 1) + min); return obj["_,_"](exp["biginteger"].BigInteger(z))(x5); }; }; }; }; }; }; }
+							if (prop === "RandomNat") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "RandomGenStdGen") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "freeHaskellFunPtr") { return function(x0) { return function(x1) { return exp["jAgda.IO"]["IO"]["return"](exp["agda-rts"].primIntegerFromString("0")); }; }; }
+							if (prop === "myThreadId") { return function() { return exp["jAgda.IO"]["IO"]["return"](exp["agda-rts"].primIntegerFromString("0")); }; }
+							if (prop === "installHandler") { return function(x0) { return function(x1) { return function(x2) { aborthandler = x1({"catch": function(c) { return c; }, "default": function(c) { return undefined; }}); return exp["jAgda.IO"]["IO"]["return"](x1); }; }; }; }
+							if (prop === "sigINT") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "sigTERM") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "select''") { return function(x0) { return function(x1) { return function(x2) { return function(x3) { return function() { return function() { return exp["jAgda.IO"]["IO"]["return"](stdin.length !== 0 ? 1 : 0); }; }; }; }; }; }; }
+							if (prop === "NumCLong") { return {"lift": function(x0) { return function(x1) { return x1["return"](x0); }; }, "return": function(x0) { return x0; } }; }
+							if (prop === "finite") { return function(x0) { return function(x1) { return [x0, x1]; }; }; }
+							if (prop === "throwTo") { return function(x0) { return function(x1) { return exp["jAgda.IO"]["IO"]["return"](exp["agda-rts"].primIntegerFromString("0")); }; }; }
+							if (prop === "stdin" || prop === "stdout" || prop == "stdInput") return obj[prop];
+							if (prop === "getArgs′") return "80 25";
+							//if (obj[prop] === undefined) console.log(prop);
+							return obj[prop]; //return Reflect.get(...arguments);
+						},
+						set: function(obj, prop, value) {
+							if (prop === "os" || prop === "hGetChar" || prop === "newIORef" || prop === "nullFunPtr" || prop === "mkHandler" || prop === "writeIORef" || prop === "hSetEcho" || prop === "system" ||
+								prop === "readIORef" || prop === "c_SetConsoleCtrlHandler" || prop === "hSetBuffering" || prop === "hIsTerminalDevice" || prop === "fromEnum" || prop === "chr" || prop === "EnumCInt" ||
+								prop === "c_getch") return;
+							obj[prop] = value; //return Reflect.set(...arguments);
+						}
+					};
+					exports = new Proxy(exports, handler);
+					exp[module] = exports;
+				} else if (module == "jAgda.Agda.Builtin.Char") {
+					var handler = {
+						get: function(obj, prop) {
+							if (prop === "primCharToNat") return function(x) { return exp["biginteger"].BigInteger(x.charCodeAt(0)); };
+							if (prop === "primNatToChar") return function(x) { return String.fromCharCode(x.toJSValue()); };
+							return obj[prop];
+						},
+						set: function(obj, prop, value) {
+							if (prop === "primCharToNat" || prop === "primNatToChar") return;
+							obj[prop] = value;
+						}
+					};
+					exports = new Proxy(exports, handler);
+					exp[module] = exports;
+				} else if (module === "jAgda.IO.Primitive") {
+					var handler = {
+						get: function(obj, prop) {
+							//if (prop === "_>>=_") return function(x0) { return function(x1) { return function(x2) { return function(x3) { return function(x4) { return function (x5) { return x5(exp["jAgda.IO"]["IO"]["lift"](x4)); }; }; }; }; }; };
+							if (prop === "_>>=_") return function(x0) { return function(x1) { return function(x2) { return exp["jAgda.IO"]["IO"]["_>>=_"]; }; }; };
+							if (prop === "return") return function(x0) { return function(x1) { return exp["jAgda.IO"]["IO"]["return"]; }; };
+							if (prop === "putStr") return function(x0) { termEmuStr(fromColist(x0).join("")); return exp["jAgda.IO"]["IO"]["return"](exp["agda-rts"].primIntegerFromString("0")); };
+							return obj[prop];
+						},
+						set: function(obj, prop, value) {
+							if (prop === "_>>=_" || prop === "return" || prop === "putStr") return;
+							obj[prop] = value;
+						}
+					};
+					exports = new Proxy(exports, handler);
+					exp[module] = exports;					
+				} else if (module === "jAgda.Relation.Nullary.Decidable.Core") {
+					//map′ has a spurious x4 call which should be removed
+					var handler = {
+						set: function(obj, prop, value) {
+							if (prop === "map′") {
+obj[prop] = function (x0) {
+    return function (x1) {
+      return function (x2) {
+        return function (x3) {
+          return function (x4) {
+            return function (x5) {
+              return function (x6) {
+                return z_jAgda_Relation_Nullary["_because_"](z_jAgda_Relation_Nullary["Dec"]["does"](x6))(x6["_because_"]({
+                  "_because_": function (x7, x8) {
+                    return (function (x,v) { return ((x)? v["true"]() : v["false"]()); })(x7, {
+                      "false": function () {
+                        return z_jAgda_Relation_Nullary["Reflects"]["ofⁿ"](agdaRTS.primIntegerFromString("0"));
+                      },
+                      "true": function () {
+                        return z_jAgda_Relation_Nullary["Reflects"]["ofʸ"](z_jAgda_Relation_Nullary_Reflects["invert"](agdaRTS.primIntegerFromString("0"))(agdaRTS.primIntegerFromString("0"))(agdaRTS.primIntegerFromString("0"))(x8));
+                      }
+                    });
+                  }
+                }));
+              };
+            };
+          };
+        };
+      };
+    };
+  };						
+								return;
+							}
+							obj[prop] = value;
+						}
+					};
+					exports = new Proxy(exports, handler);
+					exp[module] = exports;
+				} else if (module === "jAgda.Function.Metric.Nat.Structures") {
+					//jAgda.Function.Metric.Nat.Structures.js has buggy output and requires 2 lines commented out:
+					//exports["IsMetric"] = agdaRTS.primIntegerFromString("0");
+					//exports["IsUltraMetric"] = agdaRTS.primIntegerFromString("0");
+					var handler = {
+						set: function(obj, prop, value) {
+							if (prop == "IsMetric" || prop == "IsUltraMetric") {
+								if (value === exp["agda-rts"].primIntegerFromString("0")) { return; }
+							}
+							obj[prop] = value;
+						}
+					};
+					exports = new Proxy(exports, handler);
+					exp[module] = exports;
+				}
+				//queue.push(module);
+				//new Promise(done => { requirejs(["snakejs/" + module + ".js"], done); });
+				//return getModule(module);
+				/*result = null;
+				requirejs(["snakejs/" + module + ".js"], function(data) { result = data; })
+				while (result == null) {}
+				return result;*/
+				/*xmlhttp = new XMLHttpRequest();
+				xmlhttp.open("GET", "snakejs/" + module + ".js", false);
+				xmlhttp.send(null);
+				return eval(xmlhttp.responseText);*/
+				var script = document.createElement('script');
+				script.async = false; script.defer = false;
+				script.src = order[loading[0]].path + "/" + module + ".js";
+				//script.onload = function () {
+				script.addEventListener('load', () => {
+					exp[module] = exports;
+					if (module !== order[loading[0]].main) Object.keys(exports).forEach((key) => wrapFunc(key, exports, module)); //func.apply(null/this, arguments)
+					onloadfunc();
+				});
+				//}
+				document.head.appendChild(script);
+				//return exports;
+			}
+			window.onerror = function(msg, url, line, col, errorObj) {
+				//msg == "Script error." && url == "" && line == 0
+				//console.log(errorObj);
+				//console.log("error " + queue[queue.length-1]);
+				//needreload.push(queue[queue.length-1]);
+				//mod = queue.pop();
+				//delete exports[mod];
+				//require(mod);
+			}
+			//https://requirejs.org/
+			//https://www.npmjs.com/package/synchronized-promise
+		</script>
+		<!-- <script src="scripts/require.js"></script> -->
+	</head>
+	<body onload="main()">
+		<canvas id="cvs" width="500" height="150" style="border:1px solid #000000;"></canvas>
+		<button id="newgame" type="button" onclick="initSnake()">New Game</button>
+		<button id="abortgame" type="button" onclick="abortSnake()">Abort</button>
+		<pre id="view" style="width: 500px; max-width: 500px; word-wrap: break-word; height: auto; overflow: auto; max-height: 50px;"></pre>
+		<pre id="output" style="width: 500px; max-width: 500px; word-wrap: break-word; height: auto; overflow: auto; max-height: 100px;"></pre>
+	</body>
+</html>
